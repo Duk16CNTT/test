@@ -1,87 +1,76 @@
 from EmulatorGUI import GPIO
-#import RPi.GPIO as GPIO
+from lcd_display import LCD  # Import lớp giả lập LCD
 import time
 import traceback
-import Adafruit_DHT
-from RPLCD.i2c import CharLCD
+import random  # Giả lập nhiệt độ, độ ẩm
 
-def Main():
-    try:
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-      
-        # Thiết lập các chân GPIO
-        GPIO.setup(4, GPIO.IN)  # Cảm biến DHT22
-        GPIO.setup(17, GPIO.OUT, initial=GPIO.LOW)  # Rơ le 90cm
-        GPIO.setup(27, GPIO.OUT, initial=GPIO.LOW)  # Rơ le 45cm
-        GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Cảm biến 90cm
-        GPIO.setup(26, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Cảm biến 45cm
-        GPIO.setup(23, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Nút nhấn Start
-        GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Nút nhấn Stop
-        GPIO.setup(25, GPIO.OUT)  # Đèn LED
+# Thiết lập GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
 
-        # Thiết lập LCD
-        lcd = CharLCD('PCF8574', 0x27)
+# Cấu hình GPIO
+GPIO.setup(4, GPIO.OUT)  # LED báo hiệu hoạt động
+GPIO.setup(17, GPIO.OUT, initial=GPIO.LOW)  # Rơ le 90cm
+GPIO.setup(27, GPIO.OUT, initial=GPIO.LOW)  # Rơ le 45cm
+GPIO.setup(23, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Nút Start
+GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Nút Stop
+GPIO.setup(22, GPIO.IN)  # Cảm biến 90cm
+GPIO.setup(26, GPIO.IN)  # Cảm biến 45cm
 
-        # Khởi tạo cảm biến DHT22
-        sensor = Adafruit_DHT.DHT22
-        pin = 4
+# Khởi tạo LCD giả lập
+lcd = LCD()
+lcd.lcd_display_string("DEM SAN PHAM C", 1)
+lcd.lcd_display_string("Temp: --C Hum: --%", 2)
 
-        # Các biến để lưu trữ số lượng sản phẩm
-        count_90cm = 0
-        count_45cm = 0
-        is_running = False
+# Biến trạng thái
+running = False
+count_90cm = 0
+count_45cm = 0
 
-        def update_lcd(temp, humidity, count_90cm, count_45cm):
-            lcd.clear()
-            lcd.write_string(f"DEM SAN PHAM C\n")
-            lcd.write_string(f"Temp: {temp:.1f}C Hum: {humidity:.1f}%\n")
-            lcd.write_string(f"90c={count_90cm} 45c={count_45cm}")
+def read_temp_humidity():
+    """Giả lập đọc nhiệt độ và độ ẩm từ cảm biến DHT22."""
+    temp = round(random.uniform(20, 35), 1)
+    humidity = round(random.uniform(40, 80), 1)
+    return temp, humidity
 
-        while True:
-            if GPIO.input(23) == GPIO.LOW:  # Nút Start được nhấn
-                is_running = True
+try:
+    while True:
+        if GPIO.input(23) == 0:  # Nhấn Start
+            running = True
+            lcd.lcd_display_string("HE THONG CHAY...", 1)
+            time.sleep(0.5)
 
-            if GPIO.input(24) == GPIO.LOW:  # Nút Stop được nhấn
-                is_running = False
+        if GPIO.input(24) == 0:  # Nhấn Stop
+            running = False
+            lcd.lcd_display_string("HE THONG DUNG", 1)
+            time.sleep(0.5)
 
-            if is_running:
-                # Đọc dữ liệu từ cảm biến DHT22
-                humidity, temperature = Adafruit_DHT.read_retry(sensor, pin)
-                if humidity is not None and temperature is not None:
-                    # Cập nhật LCD
-                    update_lcd(temperature, humidity, count_90cm, count_45cm)
-
-                # Kiểm tra cảm biến 90cm
-                if GPIO.input(22) == GPIO.LOW:
-                    count_90cm += 1
-                    GPIO.output(17, GPIO.HIGH)  # Kích hoạt rơ le 90cm
-                    time.sleep(1)
-                    GPIO.output(17, GPIO.LOW)
-
-                # Kiểm tra cảm biến 45cm
-                if GPIO.input(26) == GPIO.LOW:
-                    count_45cm += 1
-                    GPIO.output(27, GPIO.HIGH)  # Kích hoạt rơ le 45cm
-                    time.sleep(1)
-                    GPIO.output(27, GPIO.LOW)
-
-                # Điều khiển LED nhấp nháy (bật tắt mỗi 2 giây)
-                GPIO.output(25, GPIO.HIGH)
+        if running:
+            # Xử lý cảm biến chiều cao
+            if GPIO.input(22) == 0:  # Cảm biến 90cm kích hoạt
+                GPIO.output(17, GPIO.HIGH)
+                count_90cm += 1
                 time.sleep(1)
-                GPIO.output(25, GPIO.LOW)
+                GPIO.output(17, GPIO.LOW)
+
+            if GPIO.input(26) == 0:  # Cảm biến 45cm kích hoạt
+                GPIO.output(27, GPIO.HIGH)
+                count_45cm += 1
                 time.sleep(1)
-            else:
-                # Hiển thị LCD ban đầu
-                humidity, temperature = Adafruit_DHT.read_retry(sensor, pin)
-                if humidity is not None and temperature is not None:
-                    lcd.clear()
-                    lcd.write_string(f"DEM SAN PHAM C\n")
-                    lcd.write_string(f"Temp: {temperature:.1f}C Hum: {humidity:.1f}%\n")
+                GPIO.output(27, GPIO.LOW)
 
-    except Exception as ex:
-        traceback.print_exc()
-    finally:
-        GPIO.cleanup()  # Đảm bảo ngắt kết nối an toàn
+            # Cập nhật nhiệt độ, độ ẩm và hiển thị LCD
+            temp, humidity = read_temp_humidity()
+            lcd.lcd_display_string(f"Temp:{temp}C Hum:{humidity}%", 1)
+            lcd.lcd_display_string(f"90c={count_90cm} 45c={count_45cm}", 2)
 
-Main()
+            # LED nhấp nháy
+            GPIO.output(4, GPIO.HIGH)
+            time.sleep(1)
+            GPIO.output(4, GPIO.LOW)
+            time.sleep(1)
+
+except KeyboardInterrupt:
+    print("Thoát chương trình...")
+finally:
+    GPIO.cleanup()
