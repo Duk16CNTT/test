@@ -15,9 +15,6 @@ class Sensors:
         """ Giả lập đọc độ ẩm đất (trả về % độ ẩm) """
         return round(random.uniform(20, 60), 1)  # Giá trị ngẫu nhiên từ 20% đến 60%
 
-    def read_ph(self):
-        """ Giả lập đọc giá trị pH đất """
-        return round(random.uniform(5.0, 8.0), 1)  # Giá trị pH ngẫu nhiên từ 5.0 đến 8.0
 
 # 🛠 Kiểm tra nếu chạy riêng file này
 if __name__ == "__main__":

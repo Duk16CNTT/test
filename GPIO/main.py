@@ -1,75 +1,79 @@
 from EmulatorGUI import GPIO
 from lcd_display import LCD  # Import lớp giả lập LCD
 import time
-import traceback
-import random  # Giả lập nhiệt độ, độ ẩm
+import random
+import threading
+import queue
 
 # Thiết lập GPIO
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 # Cấu hình GPIO
-GPIO.setup(4, GPIO.OUT)  # LED báo hiệu hoạt động
-GPIO.setup(17, GPIO.OUT, initial=GPIO.LOW)  # Rơ le 90cm
-GPIO.setup(27, GPIO.OUT, initial=GPIO.LOW)  # Rơ le 45cm
-GPIO.setup(23, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Nút Start
-GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Nút Stop
-GPIO.setup(22, GPIO.IN)  # Cảm biến 90cm
-GPIO.setup(26, GPIO.IN)  # Cảm biến 45cm
+TRIG = 20  # Chân Trigger của cảm biến siêu âm
+ECHO = 21  # Chân Echo của cảm biến siêu âm
+PUMP = 16  # Chân điều khiển bơm
+BTN_SET_K = 23  # Nút thiết lập giá trị k
+LED = 4  # LED báo trạng thái
+
+GPIO.setup(TRIG, GPIO.OUT, initial=GPIO.LOW)
+GPIO.setup(ECHO, GPIO.IN)
+GPIO.setup(PUMP, GPIO.OUT, initial=GPIO.LOW)
+GPIO.setup(BTN_SET_K, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(LED, GPIO.OUT, initial=GPIO.LOW)
 
 # Khởi tạo LCD giả lập
 lcd = LCD()
-lcd.lcd_display_string("DEM SAN PHAM C", 1)
-lcd.lcd_display_string("Temp: --C Hum: --%", 2)
+lcd.lcd_display_string("MUC CHAT LONG: -- cm", 1)
+lcd.lcd_display_string("K: -- cm PUMP: OFF", 2)
 
 # Biến trạng thái
-running = False
-count_90cm = 0
-count_45cm = 0
+k = 30  # Giá trị mức chất lỏng mong muốn (cm)
+pump_running = False
 
-def read_temp_humidity():
-    """Giả lập đọc nhiệt độ và độ ẩm từ cảm biến DHT22."""
-    temp = round(random.uniform(20, 35), 1)
-    humidity = round(random.uniform(40, 80), 1)
-    return temp, humidity
+# Hàng đợi để cập nhật LCD và LED
+queue_lcd = queue.Queue()
+queue_led = queue.Queue()
+
+def measure_distance():
+    """Giả lập đo khoảng cách từ cảm biến siêu âm."""
+    return round(random.uniform(10, 50), 1)
+
+def control_pump():
+    """Luồng điều khiển bơm và đọc nút nhấn."""
+    global k, pump_running
+    while True:
+        level = measure_distance()
+        if GPIO.input(BTN_SET_K) == 0:
+            k = round(random.uniform(20, 40), 1)
+            time.sleep(0.5)
+        if level > k + 5:
+            GPIO.output(PUMP, GPIO.HIGH)
+            pump_running = True
+        elif level < k - 5:
+            GPIO.output(PUMP, GPIO.LOW)
+            pump_running = False
+        
+        # Đưa dữ liệu vào hàng đợi để xử lý trong luồng chính
+        queue_lcd.put((level, k, pump_running))
+        queue_led.put(pump_running)
+        time.sleep(1)
 
 try:
+    threading.Thread(target=control_pump, daemon=True).start()
     while True:
-        if GPIO.input(23) == 0:  # Nhấn Start
-            running = True
-            lcd.lcd_display_string("HE THONG CHAY...", 1)
-            time.sleep(0.5)
-
-        if GPIO.input(24) == 0:  # Nhấn Stop
-            running = False
-            lcd.lcd_display_string("HE THONG DUNG", 1)
-            time.sleep(0.5)
-
-        if running:
-            # Xử lý cảm biến chiều cao
-            if GPIO.input(22) == 0:  # Cảm biến 90cm kích hoạt
-                GPIO.output(17, GPIO.HIGH)
-                count_90cm += 1
-                time.sleep(1)
-                GPIO.output(17, GPIO.LOW)
-
-            if GPIO.input(26) == 0:  # Cảm biến 45cm kích hoạt
-                GPIO.output(27, GPIO.HIGH)
-                count_45cm += 1
-                time.sleep(1)
-                GPIO.output(27, GPIO.LOW)
-
-            # Cập nhật nhiệt độ, độ ẩm và hiển thị LCD
-            temp, humidity = read_temp_humidity()
-            lcd.lcd_display_string(f"Temp:{temp}C Hum:{humidity}%", 1)
-            lcd.lcd_display_string(f"90c={count_90cm} 45c={count_45cm}", 2)
-
-            # LED nhấp nháy
-            GPIO.output(4, GPIO.HIGH)
-            time.sleep(1)
-            GPIO.output(4, GPIO.LOW)
-            time.sleep(1)
-
+        # Cập nhật LCD từ luồng chính
+        while not queue_lcd.empty():
+            level, k, pump_status = queue_lcd.get()
+            lcd.lcd_display_string(f"MUC CHAT LONG:{level}cm", 1)
+            lcd.lcd_display_string(f"K:{k}cm PUMP:{'ON' if pump_status else'OFF'}", 2)
+        
+        # Cập nhật LED từ luồng chính
+        while not queue_led.empty():
+            pump_status = queue_led.get()
+            GPIO.output(LED, GPIO.HIGH if pump_status else GPIO.LOW)
+        
+        time.sleep(1)
 except KeyboardInterrupt:
     print("Thoát chương trình...")
 finally:
